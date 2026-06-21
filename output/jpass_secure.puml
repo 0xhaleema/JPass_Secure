@@ -1,0 +1,662 @@
+@startuml JPass Secure Class Diagram
+skinparam classAttributeIconSize 0
+hide circle
+skinparam class {
+  BackgroundColor #f0f8ff
+  BorderColor #2c3e50
+  HeaderBackgroundColor #2c3e50
+  HeaderFontColor white
+}
+skinparam note {
+  BackgroundColor #ffffcc
+  BorderColor #ff6600
+}
+
+title JPass Secure Class Diagram\n(Security Redesign - All 18 Issues Addressed)
+
+' ===================================================
+' FIX 1, 2, 6, 13: DataModel - Password cleared after use,
+' Access control added, In-memory encryption, Security layer
+' ===================================================
+class DataModel {
+  -{static} instance: DataModel
+  -encryptedEntries: byte[]
+  -entriesKey: byte[]
+  -fileName: String
+  -password: char[]
+  -modified: boolean
+  -sessionToken: String
+  -lastActivityTime: long
+  -{static} SESSION_TIMEOUT_MS: long = 300000
+  --
+  +{static} getInstance(): DataModel
+  +getEntries(sessionToken: String): Entries
+  +setEntries(entries: Entries, sessionToken: String): void
+  -encryptEntries(entries: Entries): byte[]
+  -decryptEntries(sessionToken: String): Entries
+  +getFileName(): String
+  +setFileName(name: String): void
+  -getPassword(): char[]
+  +setPassword(pass: char[]): void
+  +isModified(): boolean
+  +setModified(modified: boolean): void
+  +clear(): void
+  +clearPasswordFromMemory(): void
+  +validateSession(token: String): boolean
+  +refreshSession(): void
+  +isSessionExpired(): boolean
+}
+
+note right of DataModel
+  FIX 1: clearPasswordFromMemory() wipes char[]
+  with Arrays.fill() - password never lingers in RAM
+  FIX 2: getEntries() requires valid sessionToken
+  FIX 6: encryptedEntries:byte[] stores data AES-encrypted.
+  encryptEntries() encrypts before storing,
+  decryptEntries() decrypts only when session valid.
+  getPassword() changed to private - no external access
+  FIX 8: isSessionExpired() auto-locks after 5 min
+  FIX 13: sessionToken validates ALL data access
+end note
+
+' ===================================================
+' FIX 3: Entry - password as char[] not String
+' ===================================================
+class Entry {
+  #title: String
+  #url: String
+  #user: String
+  -password: char[]
+  #notes: String
+  #lastModification: String
+  #creationDate: String
+  --
+  +Entry()
+  +getTitle(): String
+  +setTitle(value: String): void
+  +getUrl(): String
+  +setUrl(value: String): void
+  +getUser(): String
+  +setUser(value: String): void
+  +getPassword(): char[]
+  +setPassword(value: char[]): void
+  +clearPassword(): void
+  +getNotes(): String
+  +setNotes(value: String): void
+  +getCreationDate(): String
+  +setCreationDate(date: String): void
+  +getLastModification(): String
+}
+
+note right of Entry
+  FIX 3: password changed from String
+  to char[] so it can be manually
+  cleared from memory after use
+end note
+
+' ===================================================
+' FIX 4: XmlConverter - encryption check before export
+' ===================================================
+class XmlConverter {
+  -documentClass: Class<T>
+  -mapper: XmlMapper
+  -encryptionEnabled: boolean
+  --
+  +XmlConverter(documentClass: Class<T>)
+  +write(document: T, outputStream: OutputStream): void
+  +writeEncrypted(document: T, outputStream: OutputStream, password: char[]): void
+  +read(inputStream: InputStream): T
+  +isEncryptionEnabled(): boolean
+  +setEncryptionEnabled(enabled: boolean): void
+}
+
+note right of XmlConverter
+  FIX 4: writeEncrypted() method ensures
+  XML exports are always encrypted.
+  Plain text export now shows
+  mandatory security warning
+end note
+
+' ===================================================
+' FIX 5: JPassInputStream - separate key from data
+' ===================================================
+class JPassInputStream {
+  -keyFile: File
+  -dataFile: File
+  --
+  +JPassInputStream(dataStream: InputStream)
+  +JPassInputStream(dataStream: InputStream, keyFile: File)
+  +getKey(): byte[]
+  +getVersion(): FileVersionType
+  +getSalt(): byte[]
+  +validateKeyFileLocation(): boolean
+}
+
+note right of JPassInputStream
+  FIX 5: keyFile stored separately
+  from dataFile. Key and encrypted
+  data never stored in same location
+end note
+
+' ===================================================
+' FIX 7: ClipboardUtils - auto clear after timeout
+' ===================================================
+class ClipboardUtils {
+  -{static} EMPTY_CONTENT: EmptyClipboardContent
+  -{static} CLIPBOARD_CLEAR_DELAY_MS: int = 30000
+  -{static} clipboardTimer: Timer
+  --
+  -ClipboardUtils()
+  +{static} setClipboardContent(str: String): void
+  +{static} setClipboardContentWithAutoClear(str: String): void
+  +{static} clearClipboardContent(): void
+  +{static} getClipboardContent(): String
+  -{static} scheduleAutoClear(): void
+  -{static} cancelAutoClear(): void
+}
+
+note right of ClipboardUtils
+  FIX 7: setClipboardContentWithAutoClear()
+  automatically clears clipboard after
+  30 seconds using a Timer thread
+end note
+
+' ===================================================
+' FIX 8: JPassFrame - auto lock on inactivity
+' ===================================================
+class JPassFrame {
+  -{static} localizedMessages: ResourceBundle
+  -{static} LOG: Logger
+  -{static} instance: JPassFrame
+  +{static} PROGRAM_NAME: String
+  +{static} PROGRAM_VERSION: String
+  -{static} INACTIVITY_TIMEOUT_MS: long = 300000
+  -inactivityTimer: Timer
+  -sessionLocked: boolean
+  -popup: JPopupMenu
+  -jpassMenuBar: JMenuBar
+  -searchPanel: SearchPanel
+  -toolBar: JToolBar
+  -scrollPane: JScrollPane
+  -entryDetailsTable: EntryDetailsTable
+  -model: DataModel
+  -statusPanel: StatusPanel
+  -auditLogger: AuditLogger
+  --
+  -JPassFrame(fileName: String, locale: Locale)
+  +{static} getInstance(): JPassFrame
+  +{static} getInstance(fileName: String): JPassFrame
+  +getEntryTitleTable(): JTable
+  +getModel(): DataModel
+  +clearModel(): void
+  +refreshFrameTitle(): void
+  +refreshEntryTitleList(selectTitle: String): void
+  +refreshAll(): void
+  +exitFrame(): void
+  +lockSession(): void
+  +unlockSession(password: char[]): boolean
+  +resetInactivityTimer(): void
+  +isSessionLocked(): boolean
+  +getPopup(): JPopupMenu
+  +setProcessing(processing: boolean): void
+  +isProcessing(): boolean
+  +getSearchPanel(): SearchPanel
+  +{static} getLocalizedMessages(): ResourceBundle
+}
+
+note right of JPassFrame
+  FIX 8: inactivityTimer auto-locks
+  after 5 min of no activity
+  FIX 13: All UI operations go through
+  session validation before accessing data
+  FIX 15: auditLogger records all events
+end note
+
+' ===================================================
+' FIX 9: GeneratePasswordDialog - use SecureRandom
+' ===================================================
+class GeneratePasswordDialog {
+  -{static} SYMBOLS: String
+  -{static} PASSWORD_OPTIONS: String
+  -checkBoxes: JCheckBox
+  -customSymbolsCheck: JCheckBox
+  -customSymbolsField: JTextField
+  -passwordField: JTextField
+  -lengthSpinner: JSpinner
+  -acceptButton: JButton
+  -cancelButton: JButton
+  -generateButton: JButton
+  -generatedPassword: char[]
+  -secureRandom: SecureRandom
+  --
+  +GeneratePasswordDialog(parent: JFrame)
+  +GeneratePasswordDialog(parent: JDialog)
+  -initDialog(parent: Component, showAcceptButton: boolean): void
+  +actionPerformed(e: ActionEvent): void
+  +getGeneratedPassword(): Optional<char[]>
+  -generateSecurePassword(): char[]
+}
+
+note right of GeneratePasswordDialog
+  FIX 9: Random replaced with SecureRandom
+  for cryptographically secure password
+  generation. generatedPassword stored
+  as char[] not String
+end note
+
+' ===================================================
+' FIX 10, 12: FileHelper - integrity check + XML validation
+' ===================================================
+class FileHelper {
+  -{static} JPASS_DATA_FILES: String
+  -{static} XML_FILES: String
+  --
+  -FileHelper()
+  +{static} createNew(parent: JPassFrame): void
+  +{static} exportFile(parent: JPassFrame): void
+  +{static} importFile(parent: JPassFrame): void
+  +{static} importFileInBackground(fileName: String, parent: JPassFrame): void
+  +{static} saveFile(parent: JPassFrame, saveAs: boolean): void
+  +{static} openFile(parent: JPassFrame): void
+  +{static} openFileInBackground(fileName: String, parent: JPassFrame): void
+  -{static} verifyFileIntegrity(file: File): boolean
+  -{static} validateXmlContent(file: File): boolean
+  -{static} computeFileChecksum(file: File): String
+  -{static} showFileChooser(parent: JPassFrame, taskName: String, extension: String, description: String): File
+  -{static} checkFileOverwrite(fileName: String, parent: JPassFrame): boolean
+}
+
+note right of FileHelper
+  FIX 10: verifyFileIntegrity() checks
+  HMAC checksum before loading file
+  FIX 12: validateXmlContent() validates
+  XML structure and sanitizes content
+  before importing to prevent malicious XML
+end note
+
+' ===================================================
+' FIX 11: EntryHelper - re-auth before sensitive ops
+' ===================================================
+class EntryHelper {
+  -EntryHelper()
+  +{static} deleteEntry(parent: JPassFrame): void
+  +{static} duplicateEntry(parent: JPassFrame): void
+  +{static} editEntry(parent: JPassFrame): void
+  +{static} addEntry(parent: JPassFrame): void
+  +{static} getSelectedEntry(parent: JPassFrame): Entry
+  +{static} copyEntryField(parent: JPassFrame, content: String): void
+  -{static} requireReAuthentication(parent: JPassFrame): boolean
+}
+
+note right of EntryHelper
+  FIX 11: requireReAuthentication()
+  asks for master password before
+  delete, edit and duplicate operations
+end note
+
+' ===================================================
+' FIX 13: AccessController - dedicated security layer
+' between UI (JPassFrame) and data (DataModel)
+' ===================================================
+class AccessController {
+  -{static} instance: AccessController
+  -currentSessionToken: String
+  -failedAttempts: int
+  -{static} MAX_FAILED_ATTEMPTS: int = 3
+  -lockoutUntil: long
+  --
+  +{static} getInstance(): AccessController
+  +authenticate(password: char[]): String
+  +isAuthorized(sessionToken: String): boolean
+  +revokeSession(sessionToken: String): void
+  +recordFailedAttempt(): void
+  +isLockedOut(): boolean
+  +resetFailedAttempts(): void
+  -generateSessionToken(): String
+}
+
+note right of AccessController
+  FIX 13: NEW dedicated security layer sitting
+  between ALL UI classes and DataModel.
+  JPassFrame, EntryHelper, FileHelper, Worker
+  must call isAuthorized() before any data access.
+  Tracks failed login attempts and enforces
+  lockout after MAX_FAILED_ATTEMPTS failures.
+  generateSessionToken() creates cryptographically
+  random token using SecureRandom
+end note
+
+' ===================================================
+' ===================================================
+class CryptInputStream {
+  -{static} FETCH_BUFFER_SIZE: int
+  -_parent: InputStream
+  -_cipher: Cbc
+  -_buffer: byte[]
+  -_iv: byte[]
+  --
+  +CryptInputStream(parent: JPassInputStream)
+  +CryptInputStream(parent: InputStream, key: byte[], iv: byte[])
+  +validateIV(iv: byte[]): boolean
+  +isIVReused(iv: byte[]): boolean
+  +read(): int
+  +close(): void
+}
+
+class CryptOutputStream {
+  -_cipher: Cbc
+  -_buffer: byte[]
+  -_iv: byte[]
+  -usedIVs: Set<String>
+  --
+  +CryptOutputStream(parent: OutputStream, key: byte[], iv: byte[])
+  +generateUniqueIV(): byte[]
+  +validateUniqueIV(iv: byte[]): boolean
+  +write(b: int): void
+  +write(b: byte[]): void
+  +close(): void
+  +finishEncryption(): void
+}
+
+note right of CryptOutputStream
+  FIX 14: generateUniqueIV() creates new
+  random IV for each encryption session.
+  usedIVs tracks previous IVs to prevent
+  reuse across sessions
+end note
+
+' ===================================================
+' FIX 15: NEW CLASS - AuditLogger
+' ===================================================
+class AuditLogger {
+  -{static} instance: AuditLogger
+  -logFile: File
+  -logEntries: List<AuditEntry>
+  --
+  +{static} getInstance(): AuditLogger
+  +logLoginAttempt(success: boolean, timestamp: long): void
+  +logFileAccess(fileName: String, action: String): void
+  +logPasswordChange(timestamp: long): void
+  +logEntryModification(entryTitle: String, action: String): void
+  +logSessionEvent(event: String): void
+  +logExportEvent(fileName: String, encrypted: boolean): void
+  +getAuditTrail(): List<AuditEntry>
+  -writeToLog(entry: AuditEntry): void
+}
+
+note right of AuditLogger
+  FIX 15: NEW CLASS - Records all
+  security-relevant events:
+  login attempts, file access,
+  password changes, entry modifications
+end note
+
+' ===================================================
+' FIX 16: DocumentProcessException - safe error messages
+' ===================================================
+class DocumentProcessException {
+  -safeMessage: String
+  -internalDetails: String
+  --
+  +DocumentProcessException(safeMessage: String)
+  +DocumentProcessException(safeMessage: String, internalCause: Throwable)
+  +getMessage(): String
+  +getSafeMessage(): String
+  -sanitizeMessage(message: String): String
+}
+
+note right of DocumentProcessException
+  FIX 16: getSafeMessage() returns
+  user-friendly message without
+  internal paths, encryption details
+  or system information
+end note
+
+' ===================================================
+' FIX 17: SearchPanel - protected search input
+' ===================================================
+class SearchPanel {
+  -{static} CLOSE_BUTTON_ACTION_COMMAND: String
+  -{static} SEARCH_PANEL_CLOSE_ACTION: String
+  -label: JLabel
+  -criteriaField: JTextField
+  -closeButton: JButton
+  -searchHistory: List<String>
+  --
+  +SearchPanel(searchCallback: Consumer<Boolean>)
+  +setVisible(visible: boolean): void
+  +setEnabled(enabled: boolean): void
+  +actionPerformed(e: ActionEvent): void
+  +getSearchCriteria(): String
+  +clearSearchHistory(): void
+  -sanitizeSearchInput(input: String): String
+}
+
+note right of SearchPanel
+  FIX 17: clearSearchHistory() wipes
+  search history on session end.
+  sanitizeSearchInput() prevents
+  injection through search field
+end note
+
+' ===================================================
+' FIX 18: Worker - authentication check added
+' ===================================================
+abstract class Worker {
+  -parent: JPassFrame
+  -authenticated: boolean
+  --
+  +Worker(parent: JPassFrame)
+  #done(): void
+  #showErrorMessage(e: Exception): void
+  #stopProcessing(): void
+  #isAuthenticated(): boolean
+  #requireAuthentication(): boolean
+  #executeIfAuthenticated(task: Runnable): void
+}
+
+note right of Worker
+  FIX 18: requireAuthentication()
+  verifies session is valid before
+  executing any background task.
+  executeIfAuthenticated() wraps
+  all sensitive operations
+end note
+
+' ===================================================
+' EXISTING SECURE CLASSES (unchanged)
+' ===================================================
+class Aes256 {
+  -{static} WORD_SIZE: int
+  -{static} BLOCK_SIZE: int
+  -{static} KEY_SIZE: int
+  -{static} ROUNDS: int
+  -{static} EXPANDED_KEY_SIZE: int
+  -_expandedKey: byte[]
+  -_tmp: byte[]
+  -_sBox: byte[]
+  -_invSBox: byte[]
+  --
+  +Aes256(key: byte[])
+  +encrypt(inBlock: byte[], inIndex: int, outBlock: byte[], outIndex: int): void
+  +decrypt(inBlock: byte[], inIndex: int, outBlock: byte[], outIndex: int): void
+}
+
+class Cbc {
+  -_cipher: Aes256
+  -_buffer: byte[]
+  --
+  +encrypt(data: byte[]): void
+  +decrypt(data: byte[]): void
+  +finishEncryption(): void
+  +finishDecryption(): void
+}
+
+class EntriesRepository {
+  -{static} ENCODING: String
+  -password: char[]
+  --
+  +{static} newInstance(fileName: String): EntriesRepository
+  +{static} newInstance(fileName: String, key: char[]): EntriesRepository
+  +readDocument(): Entries
+  +writeDocument(document: Entries): void
+}
+
+class SessionManager {
+  -{static} instance: SessionManager
+  -activeSessions: Map<String, Long>
+  -{static} SESSION_TIMEOUT_MS: long = 300000
+  --
+  +{static} getInstance(): SessionManager
+  +createSession(): String
+  +isSessionValid(token: String): boolean
+  +refreshSession(token: String): void
+  +invalidateSession(token: String): void
+  +invalidateAllSessions(): void
+  +getSessionAge(token: String): long
+  -cleanExpiredSessions(): void
+}
+
+note right of SessionManager
+  NEW supporting class - centralizes all
+  session lifecycle management.
+  Used by DataModel, AccessController and
+  JPassFrame to maintain consistent session state.
+  cleanExpiredSessions() runs periodically
+  to purge stale tokens from activeSessions map
+end note
+
+class AuditEntry {
+  -timestamp: long
+  -eventType: String
+  -description: String
+  -success: boolean
+  -sessionToken: String
+  --
+  +AuditEntry(eventType: String, desc: String, success: boolean)
+  +getTimestamp(): long
+  +getEventType(): String
+  +getDescription(): String
+  +isSuccess(): boolean
+  +toLogString(): String
+}
+
+class EmptyClipboardContent {
+  +getTransferDataFlavors(): DataFlavor[]
+  +isDataFlavorSupported(flavor: DataFlavor): boolean
+  +getTransferData(flavor: DataFlavor): Object
+  +lostOwnership(clipboard: Clipboard, contents: Transferable): void
+}
+
+class JPassOutputStream {
+  --
+  +JPassOutputStream(parent: OutputStream, key: byte[])
+  +write(b: int): void
+  +close(): void
+}
+
+class Entries {
+  #entry: List<Entry>
+  --
+  +getEntry(): List<Entry>
+}
+class CryptUtils {
+  -CryptUtils()
+  +{static} getPBKDF2KeyWithDefaultIterations(text: char[], salt: byte[]): byte[]
+  +{static} getPBKDF2Key(text: char[], salt: byte[], iteration: int): byte[]
+  +{static} getSha256HashWithDefaultIterations(text: char[]): byte[]
+  +{static} generateRandomSalt(saltLength: int): byte[]
+  +{static} newRandomNumberGenerator(): SecureRandom
+}
+
+class Configuration {
+  -{static} instance: Configuration
+  -properties: Properties
+  --
+  -Configuration()
+  +is(key: String, defaultValue: Boolean): Boolean
+  +get(key: String, defaultValue: String): String
+  +{static} getInstance(): Configuration
+}
+
+class EntryDialog {
+  -titleField: JTextField
+  -userField: JTextField
+  -passwordField: JPasswordField
+  -repeatField: JPasswordField
+  -urlField: JTextField
+  -notesField: JTextArea
+  -okButton: JButton
+  -cancelButton: JButton
+  -modifiedEntry: Entry
+  -newEntry: boolean
+  --
+  +EntryDialog(parent: JPassFrame, title: String, entry: Entry, newEntry: boolean)
+  +actionPerformed(e: ActionEvent): void
+  +getModifiedEntry(): Optional<Entry>
+  -requireAuthForSensitiveOps(): boolean
+}
+
+class EntryDetailsTable {
+  -tableModel: DefaultTableModel
+  --
+  +EntryDetailsTable()
+  +isCellEditable(row: int, column: int): boolean
+  +clear(): void
+  +addRow(entry: Entry): void
+}
+
+class StatusPanel {
+  -label: JLabel
+  -progressBar: JProgressBar
+  --
+  +StatusPanel()
+  +setText(text: String): void
+  +setProcessing(processing: boolean): void
+}
+
+class MessageDialog {
+  --
+  +{static} showWarningMessage(parent: Component, message: String): void
+  +{static} showErrorMessage(parent: Component, message: String): void
+  +{static} showPasswordDialog(parent: Component, confirm: boolean): char[]
+}
+
+' ===================================================
+' RELATIONSHIPS
+' ===================================================
+Cbc *-- Aes256
+CryptInputStream *-- Cbc
+CryptOutputStream *-- Cbc
+DataModel *-- AuditLogger
+DataModel ..> Entry
+DataModel ..> SessionManager
+EntriesRepository *-- XmlConverter
+EntriesRepository o-- Entries
+JPassFrame *-- SearchPanel
+JPassFrame *-- EntryDetailsTable
+JPassFrame *-- DataModel
+JPassFrame *-- StatusPanel
+JPassFrame *-- AuditLogger
+JPassFrame ..> AccessController
+Worker *-- JPassFrame
+Worker ..> AccessController
+EntryDetailsTable ..> Entry
+EntryDialog *-- Entry
+EntryDialog ..> JPassFrame
+EntryDialog ..> AccessController
+EntryHelper ..> JPassFrame
+EntryHelper ..> Entry
+EntryHelper ..> AccessController
+FileHelper ..> JPassFrame
+FileHelper ..> AuditLogger
+FileHelper ..> AccessController
+ClipboardUtils *-- EmptyClipboardContent
+ClipboardUtils ..> AuditLogger
+Entries o-- Entry
+AuditLogger *-- AuditEntry
+AccessController ..> SessionManager
+CryptInputStream ..> JPassInputStream
+CryptOutputStream ..> JPassOutputStream
+
+@enduml

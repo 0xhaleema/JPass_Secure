@@ -1,0 +1,160 @@
+import org.apache.tools.ant.filters.FixCrLfFilter
+
+plugins {
+    id 'java'
+    id 'distribution'
+    id 'org.gradle.crypto.checksum' version '1.4.0'
+    id 'checkstyle'
+    id 'jacoco'
+    id 'jvm-test-suite'
+}
+
+compileJava.options.encoding = 'UTF-8'
+
+version = '1.0.7-SNAPSHOT'
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    implementation group: 'com.fasterxml.jackson.dataformat', name: 'jackson-dataformat-xml', version: '2.16.2'
+    implementation group: 'com.formdev', name: 'flatlaf', version: '3.4.1'
+    implementation group: 'com.formdev', name: 'svgSalamander', version: '1.1.4'
+}
+
+testing {
+    suites {
+        test {
+            useJUnitJupiter()
+        }
+    }
+}
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_1_8
+    targetCompatibility = JavaVersion.VERSION_1_8
+}
+
+jar {
+    archiveBaseName = 'jpass'
+    archiveVersion = "$project.version"
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    manifest {
+        attributes('Main-Class': 'jpass.JPass')
+    }
+    from {
+        configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) }
+    }
+}
+
+task copyConfig(type: Copy) {
+    from "$projectDir/src/main/config"
+    into "$buildDir/libs"
+}
+
+distributions {
+    main {
+        distributionBaseName = 'jpass'
+        contents {
+            from jar
+            from "$projectDir/src/main/config"
+            from("$projectDir/src/main/distribution") {
+                include 'jpass.sh'
+                include 'jpass.desktop'
+                include 'jpass.command'
+                include 'install.sh'
+                filter(FixCrLfFilter, eol: FixCrLfFilter.CrLf.newInstance('unix'))
+            }
+            from("$projectDir/src/main/distribution") {
+                include 'jpass.bat'
+                filter(FixCrLfFilter, eol: FixCrLfFilter.CrLf.newInstance('dos'))
+            }
+            from("$projectDir/src/main/distribution") {
+                include 'jpass.ico'
+                include 'jpass.png'
+                include 'jpass.svg'
+                include 'readme.txt'
+            }
+            into '/'
+        }
+    }
+}
+
+task createChecksum(type: org.gradle.crypto.checksum.Checksum, dependsOn: distZip) {
+    files = fileTree(dir: "$buildDir/distributions").matching { include "*.zip" }
+    outputDir = new File("$buildDir/distributions")
+    algorithm = org.gradle.crypto.checksum.Checksum.Algorithm.SHA256
+    appendFileNameToChecksum.set(true)
+}
+
+task bumpVersion {
+    doLast {
+        if (!project.hasProperty('toVersion')) {
+            throw new GradleException("Please provide 'toVersion' property e.g. gradle bumpVersion -PtoVersion=$project.version")
+        }
+        def extensions = ['java', 'gradle', 'xml', 'md', 'bat', 'sh', 'txt', 'command'].collect { "**/*.$it" }.join(",")
+        def files = fileTree("$projectDir").matching { include extensions }.files.collect { it.absolutePath }
+        files.each { versionedFile ->
+            def file = new File(versionedFile)
+            file.write(file.getText('UTF-8').replaceAll("$project.version", "$toVersion"), 'UTF-8')
+        }
+    }
+}
+
+task updateScoopManifest {
+    enabled = "${project.version}".endsWith('-RELEASE')
+    doLast {
+        def manifestFile = new File("$projectDir/jpass.json")
+        def manifest = new groovy.json.JsonSlurper().parse(manifestFile)
+        manifest['hash'] = new File("$projectDir/build/distributions/jpass-${project.version}.zip.sha256").text.split(' ')[0]
+        manifest['url'] = "https://github.com/gaborbata/jpass/releases/download/v${project.version.split('-')[0]}/jpass-${project.version}.zip"
+        def updatedManifest = groovy.json.JsonOutput.prettyPrint(groovy.json.JsonOutput.toJson(manifest))
+        manifestFile.write(updatedManifest)
+    }
+}
+
+jacocoTestCoverageVerification {
+    violationRules {
+        rule {
+            element = 'PACKAGE'
+                limit {
+                    counter = 'LINE'
+                    value = 'COVEREDRATIO'
+                    minimum = 0.8
+            }
+            includes = [
+                'jpass.data',
+                'jpass.crypt',
+                'jpass.crypt.io',
+                'jpass.io',
+                'jpass.xml.converter',
+                'jpass.xml.bind'
+            ]
+        }
+
+        rule {
+            element = 'PACKAGE'
+                limit {
+                    counter = 'LINE'
+                    value = 'COVEREDRATIO'
+                    minimum = 0.4
+            }
+            includes = [
+                'jpass.util'
+            ]
+        }
+    }
+}
+
+distTar.enabled = false
+distZip.finalizedBy(createChecksum)
+assembleDist.dependsOn copyConfig
+
+test.finalizedBy jacocoTestReport
+jacocoTestReport.dependsOn test
+jacocoTestCoverageVerification.dependsOn jacocoTestReport
+check.dependsOn jacocoTestCoverageVerification
+
+createChecksum.finalizedBy updateScoopManifest
+
