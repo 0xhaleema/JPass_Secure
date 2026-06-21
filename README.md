@@ -135,8 +135,8 @@ Based on the findings, the following hardening measures were proposed:
 ## Authors
 
 **Haleema Abid** — [0xhaleema.github.io](https://0xhaleema.github.io) · [GitHub](https://github.com/0xhaleema)
-**Samreen Shoukat**
-**Hamna Saleem**
+, **Samreen Shoukat**
+, **Hamna Saleem**
 
 BS Cybersecurity — Air University Kamra Campus
 
